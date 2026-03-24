@@ -1,0 +1,84 @@
+name: Build Production APK
+
+on:
+  push:
+    branches: [ "main", "release" ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Build Release APK
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.0'
+          channel: 'stable'
+          cache: true
+
+      - name: Display Flutter version
+        run: flutter --version
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Run Flutter analysis
+        run: flutter analyze
+        continue-on-error: true
+
+      - name: Run tests
+        run: flutter test --coverage
+        continue-on-error: true
+
+      - name: Build APK (Release)
+        run: flutter build apk --release --target-platform=android-arm64 --verbose
+
+      - name: Build APK (ARM32)
+        run: flutter build apk --release --target-platform=android-arm --split-per-abi
+        continue-on-error: true
+
+      - name: List build outputs
+        run: find build/app/outputs -type f -name "*.apk" || echo "No APKs found"
+
+      - name: Rename APK to production format
+        run: |
+          mkdir -p release
+          if [ -f build/app/outputs/flutter-apk/app-release.apk ]; then
+            mv build/app/outputs/flutter-apk/app-release.apk release/coin-to-coins-v${{ github.ref_name }}-release.apk
+          fi
+          ls -lh release/ || echo "No files in release"
+
+      - name: Upload APK as Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coin-to-coins-apk-release
+          path: release/
+          retention-days: 30
+          compression-level: 6
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/coin-to-coins-*.apk
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build status
+        if: always()
+        run: echo "Build Status → ${{ job.status }}"
